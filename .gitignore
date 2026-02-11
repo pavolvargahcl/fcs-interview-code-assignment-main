@@ -3,6 +3,7 @@
 
 # Log file
 *.log
+NUL
 
 # BlueJ files
 *.ctxt
@@ -22,3 +23,47 @@
 # virtual machine crash logs, see http://www.java.com/en/download/help/error_hotspot.xml
 hs_err_pid*
 replay_pid*
+
+# Maven Build Folder
+target/
+
+### IntelliJ IDEA ###
+.idea/*
+*.iws
+*.iml
+*.ipr
+!.idea/runConfigurations/
+
+# VS Code
+.vscode
+
+# TODOs
+TODO*.md
+
+# Google Cloud Service Account Keys
+*-key.json
+
+# Redis persistence
+dump.rdb
+
+# Angular Build
+**/src/main/resources/static/browser/
+**/src/main/resources/static/prerendered-routes.json
+
+# Ignore Python compiled bytecode
+__pycache__/
+
+# NodeJS
+node_modules/
+
+# Documents
+*.pdf
+*.docx
+*.pptx
+
+# CLAUDE
+.claude/
+
+# Environment Files
+.env
+

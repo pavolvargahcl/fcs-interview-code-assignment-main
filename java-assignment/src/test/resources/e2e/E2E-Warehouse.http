@@ -1,0 +1,157 @@
+### ============================================
+### E2E Smoke Tests — Warehouse API
+### ============================================
+### Run against a live Quarkus instance (mvn quarkus:dev).
+### Select the "local" environment in IntelliJ HTTP Client.
+### Requests are ordered to form a full CRUD lifecycle.
+
+
+### 1. List all active warehouses (seed data: MWH.001, MWH.012, MWH.023)
+GET {{host}}/warehouse
+Accept: application/json
+
+> {%
+    client.test("should return 200 with seed warehouses", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.length >= 3);
+    });
+%}
+
+
+### 2. Get a single warehouse by ID
+GET {{host}}/warehouse/1
+Accept: application/json
+
+> {%
+    client.test("should return warehouse with id 1", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.businessUnitCode === "MWH.001");
+    });
+%}
+
+
+### 3. Create a new warehouse
+POST {{host}}/warehouse
+Content-Type: application/json
+
+{
+  "businessUnitCode": "NEW.001",
+  "location": "AMSTERDAM-001",
+  "capacity": 20,
+  "stock": 5
+}
+
+> {%
+    client.test("should create warehouse and return 200", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.businessUnitCode === "NEW.001");
+        client.assert(response.body.location === "AMSTERDAM-001");
+    });
+%}
+
+
+### 4. Create with invalid location (expect 400)
+POST {{host}}/warehouse
+Content-Type: application/json
+
+{
+  "businessUnitCode": "FAIL.001",
+  "location": "NONEXISTENT-LOC",
+  "capacity": 20,
+  "stock": 5
+}
+
+> {%
+    client.test("should reject invalid location with 400", function () {
+        client.assert(response.status === 400);
+    });
+%}
+
+
+### 5. Create with duplicate business unit code (expect 400)
+POST {{host}}/warehouse
+Content-Type: application/json
+
+{
+  "businessUnitCode": "MWH.001",
+  "location": "AMSTERDAM-001",
+  "capacity": 20,
+  "stock": 5
+}
+
+> {%
+    client.test("should reject duplicate BU code with 400", function () {
+        client.assert(response.status === 400);
+    });
+%}
+
+
+### 6. Replace warehouse MWH.012 with higher capacity
+POST {{host}}/warehouse/MWH.012/replacement
+Content-Type: application/json
+
+{
+  "location": "AMSTERDAM-001",
+  "capacity": 60,
+  "stock": 5
+}
+
+> {%
+    client.test("should replace warehouse and return 200", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.businessUnitCode === "MWH.012");
+        client.assert(response.body.capacity === 60);
+    });
+%}
+
+
+### 7. Replace non-existent warehouse (expect 404)
+POST {{host}}/warehouse/NON.EXISTENT/replacement
+Content-Type: application/json
+
+{
+  "location": "AMSTERDAM-001",
+  "capacity": 20,
+  "stock": 5
+}
+
+> {%
+    client.test("should return 404 for non-existent BU code", function () {
+        client.assert(response.status === 404);
+    });
+%}
+
+
+### 8. Archive warehouse by ID (id=3 = MWH.023)
+DELETE {{host}}/warehouse/3
+Accept: application/json
+
+> {%
+    client.test("should archive warehouse with 204", function () {
+        client.assert(response.status === 204);
+    });
+%}
+
+
+### 9. Verify archived warehouse is gone from listing
+GET {{host}}/warehouse
+Accept: application/json
+
+> {%
+    client.test("archived warehouse should not appear in list", function () {
+        client.assert(response.status === 200);
+        var codes = response.body.map(function(w) { return w.businessUnitCode; });
+        client.assert(!codes.includes("MWH.023"), "MWH.023 should be archived");
+    });
+%}
+
+
+### 10. Get archived warehouse by ID (expect 404)
+GET {{host}}/warehouse/3
+Accept: application/json
+
+> {%
+    client.test("should return 404 for archived warehouse", function () {
+        client.assert(response.status === 404);
+    });
+%}

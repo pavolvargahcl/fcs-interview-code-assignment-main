@@ -1,0 +1,113 @@
+### ============================================
+### E2E Smoke Tests — Store API
+### ============================================
+### Run against a live Quarkus instance (mvn quarkus:dev).
+### Select the "local" environment in IntelliJ HTTP Client.
+
+
+### 1. List all stores (seed data: TONSTAD, KALLAX, BESTA)
+GET {{host}}/store
+Accept: application/json
+
+> {%
+    client.test("should return 200 with seed stores", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.length >= 3);
+    });
+%}
+
+
+### 2. Get a single store by ID
+GET {{host}}/store/1
+Accept: application/json
+
+> {%
+    client.test("should return store with id 1", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.name === "TONSTAD");
+    });
+%}
+
+
+### 3. Create a new store
+POST {{host}}/store
+Content-Type: application/json
+
+{
+  "name": "HEMNES",
+  "quantityProductsInStock": 15
+}
+
+> {%
+    client.test("should create store and return 201", function () {
+        client.assert(response.status === 201);
+        client.assert(response.body.name === "HEMNES");
+    });
+%}
+
+
+### 4. Update store (PUT)
+PUT {{host}}/store/1
+Content-Type: application/json
+
+{
+  "name": "TONSTAD-UPDATED",
+  "quantityProductsInStock": 25
+}
+
+> {%
+    client.test("should update store and return 200", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.name === "TONSTAD-UPDATED");
+    });
+%}
+
+
+### 5. Patch store (PATCH)
+PATCH {{host}}/store/2
+Content-Type: application/json
+
+{
+  "name": "KALLAX-PATCHED",
+  "quantityProductsInStock": 8
+}
+
+> {%
+    client.test("should patch store and return 200", function () {
+        client.assert(response.status === 200);
+        client.assert(response.body.name === "KALLAX-PATCHED");
+    });
+%}
+
+
+### 6. Delete a store
+DELETE {{host}}/store/3
+Accept: application/json
+
+> {%
+    client.test("should delete store with 204", function () {
+        client.assert(response.status === 204);
+    });
+%}
+
+
+### 7. Get deleted store (expect 404)
+GET {{host}}/store/3
+Accept: application/json
+
+> {%
+    client.test("should return 404 for deleted store", function () {
+        client.assert(response.status === 404);
+    });
+%}
+
+
+### 8. Get non-existent store (expect 404)
+GET {{host}}/store/999
+Accept: application/json
+
+> {%
+    client.test("should return 404 for non-existent store", function () {
+        client.assert(response.status === 404);
+    });
+%}
