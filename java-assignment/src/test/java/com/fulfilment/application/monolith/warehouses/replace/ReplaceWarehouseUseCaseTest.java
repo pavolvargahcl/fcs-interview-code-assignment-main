@@ -110,6 +110,28 @@ public class ReplaceWarehouseUseCaseTest {
     verify(warehouseStore, never()).create(any());
   }
 
+  @Test
+  void shouldRejectWhenCapacityExceedsLocationMax() {
+    // Given — existing has capacity 30, replacement wants 80, location max is 100
+    // Another warehouse at same location has capacity 50
+    // adjustedCapacitySum = (30 + 50) - 30 = 50, 50 + 80 = 130 > 100
+    Warehouse existing = buildWarehouse("MWH.001", "AMSTERDAM-001", 30, 10);
+    existing.createdAt = LocalDateTime.of(2024, 7, 1, 0, 0);
+    Warehouse other = buildWarehouse("MWH.999", "AMSTERDAM-001", 50, 5);
+    Warehouse replacement = buildWarehouse("MWH.001", "AMSTERDAM-001", 80, 10);
+
+    when(warehouseStore.findByBusinessUnitCode("MWH.001")).thenReturn(existing);
+    when(locationResolver.resolveByIdentifier("AMSTERDAM-001"))
+        .thenReturn(new Location("AMSTERDAM-001", 5, 100));
+    when(warehouseStore.findActiveByLocation("AMSTERDAM-001")).thenReturn(List.of(existing, other));
+
+    // When / Then
+    assertThrows(WarehouseValidationException.class, () -> useCase.replace(replacement));
+    verify(warehouseStore, never()).update(any());
+    verify(warehouseStore, never()).create(any());
+  }
+
+
   private Warehouse buildWarehouse(String buCode, String location, int capacity, int stock) {
     Warehouse w = new Warehouse();
     w.businessUnitCode = buCode;

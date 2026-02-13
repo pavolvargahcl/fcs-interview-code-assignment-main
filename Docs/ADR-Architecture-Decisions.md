@@ -81,9 +81,9 @@ Decision: Use explicit type declarations (e.g. `Warehouse existing = ...`) inste
 Context: Java 10+ `var` reduces verbosity but removes type information from the source line.
 
 Rationale:
-- **AI agent processing**: Explicit types provide stronger reinforcement for code understanding, generation and review by AI coding agents (Claude, Copilot, etc.) — the type context on every line eliminates ambiguity
-- **Human reviewers without IDE**: In code reviews (GitHub PR diff, terminal, printed code), there is no hover-for-type — explicit types make the code self-documenting
-- **Test readability**: In Given/When/Then test sections, seeing `Warehouse existing = buildWarehouse(...)` immediately communicates the domain concept
+- AI agent processing: Explicit types provide stronger reinforcement for code understanding, generation and review by AI coding agents (Claude, Copilot, etc.) — the type context on every line eliminates ambiguity
+- Human reviewers without IDE: In code reviews (GitHub PR diff, terminal, printed code), there is no hover-for-type — explicit types make the code self-documenting
+- Test readability: In Given/When/Then test sections, seeing `Warehouse existing = buildWarehouse(...)` immediately communicates the domain concept
 
 Trade-off: Slightly more verbose; justified by the readability and AI-processing benefits in an assessment context.
 
@@ -105,7 +105,7 @@ Rationale:
 - Integration tests boot Quarkus with H2 in-memory database (`@QuarkusTest`)
 - E2E tests are IntelliJ HTTP Request files (`src/test/resources/e2e/`) with JavaScript assertions
 
-**Production module split** (not possible in this single-module assessment):
+Production module split (not possible in this single-module assessment):
 ```
 warehouse-domain/src/test/          → unit tests only
 warehouse-integration-tests/        → @QuarkusTest, test-containers
@@ -136,9 +136,9 @@ Decision: All test methods annotated with `// Given`, `// When`, `// Then` comme
 Context: Tests serve as living documentation. The BDD-style structure makes each test's intent immediately clear.
 
 Rationale:
-- **Given** — sets up preconditions (mocks, test data)
-- **When** — executes the action under test
-- **Then** — asserts expected outcomes
+- Given — sets up preconditions (mocks, test data)
+- When — executes the action under test
+- Then — asserts expected outcomes
 - `// When / Then` used for `assertThrows()` patterns where the action and assertion are inseparable
 
 Trade-off: Minor comment noise; justified by readability as living documentation.
@@ -156,6 +156,97 @@ Rationale:
 
 ---
 
+## ADR: Domain-Scoped Exception Handling
+Decision: Each feature owns its exception handling and error response semantics. No global `ExceptionMapper<Exception>` is used for business validation errors.
+Context: A common enterprise pattern is to register a single global `@Provider ExceptionMapper` that catches all exceptions and maps them to a uniform JSON error response. This approach is well-documented in textbooks and framework guides. However, it introduces architectural trade-offs that must be weighed against the domain structure of the application.
+
+This codebase contains multiple business features with distinct validation semantics:
+
+| Feature    | Domain Exceptions                  | Error Semantics                                                                |
+|------------|------------------------------------|--------------------------------------------------------------------------------|
+| Warehouses | `WarehouseValidationException`     | 5+ distinct validation rules (capacity, BU code, stock, location, feasibility) |
+| Stores     | `WebApplicationException` (direct) | CRUD guard clauses (not found, invalid ID, missing name)                       |
+| Products   | `WebApplicationException` (direct) | CRUD guard clauses (not found, invalid ID, missing name)                       |
+
+Rationale:
+- Separation of Concerns: Each feature controls its own error contract. The warehouse feature maps `WarehouseValidationException` to HTTP 400 with a domain-specific message containing business context (e.g., capacity limits, BU code conflicts). A global handler would need to understand all domain contexts or flatten everything into generic error responses — both violate SoC.
+- Single Responsibility Principle: The REST adapter (`WarehouseResourceImpl`) is responsible for translating between HTTP and domain semantics. Externalising this translation to a global handler moves domain knowledge outside the feature boundary.
+- Loose Coupling: Each feature can evolve its error handling independently. Adding a new validation rule to warehouses does not require modifying a shared exception handler that all features depend on.
+- Decomposition Readiness: In a microservices architecture — the natural evolution of this type of fulfilment system — each service owns its error contract. Domain-scoped handling in the monolith mirrors this target architecture, reducing friction during future decomposition.
+
+Implementation:
+- `WarehouseResourceImpl` catches `WarehouseValidationException` and maps to 400 or 404 based on message content
+- `StoreResource` and `ProductResource` throw `WebApplicationException` directly with appropriate status codes
+- Pre-existing `ErrorMapper` inner classes handle unexpected exceptions (500) with a JSON error body
+
+Trade-off: Slightly more mapping code in each resource; justified by the architectural benefits of feature autonomy and alignment with service decomposition patterns. A global handler is a valid convenience pattern for applications with uniform error semantics — but this codebase intentionally does not have uniform semantics.
+
+Reference: Robert C. Martin, *Clean Architecture* — "The architecture should scream the use cases of the application." Error handling is part of the use case contract, not a cross-cutting infrastructure concern.
+
+---
+
+## ADR: Logging Strategy — Infrastructure-Driven Observability
+Decision: Production business logic is not instrumented with application-level logging statements. Observability is addressed through infrastructure mechanisms (health endpoints, API gateway logging, service mesh tracing) and — where required — explicit compliance audit logging.
+Context: The assignment scope includes "Logging" as one of several best practices. This ADR documents the deliberate architectural decision to not add `log.info()` / `log.debug()` calls throughout the business logic, and the reasoning behind this approach.
+
+Rationale:
+1. Operational Logging — Infrastructure Responsibility
+
+In cloud-native and platform-engineered environments, operational observability is provided by the infrastructure layer, not by application code:
+
+| Concern              | Infrastructure Solution                 | Application Code Required? |
+|----------------------|-----------------------------------------|----------------------------|
+| Request/response log | API Gateway, Reverse Proxy (e.g. Envoy) | No                         |
+| Distributed tracing  | Service Mesh, OpenTelemetry             | No (auto-instrumented)     |
+| Health monitoring    | Liveness/Readiness probes               | Minimal (implemented)      |
+| Metrics              | Micrometer, Prometheus scraping         | Annotation-driven          |
+| Error alerting       | Centralised log aggregation + rules     | Exception propagation only |
+
+This codebase implements SmallRye Health endpoints (`/q/health/live`, `/q/health/ready`) for liveness and readiness probes — the observability mechanism most relevant to a deployment context.
+
+Adding `log.info("Creating warehouse: " + buCode)` to every method:
+- Duplicates what the API gateway already captures (request path, parameters, response code)
+- Pollutes business logic with infrastructure concerns, reducing readability
+- Creates risk of inadvertent PII exposure (customer data, business identifiers in log aggregation systems)
+
+2. Compliance Audit Logging — Explicit, Separate Architecture
+
+Where explicit logging *is* architecturally warranted is for regulatory compliance:
+
+| Tier         | Scope                      | Implementation            | PII Handling        |
+|--------------|----------------------------|---------------------------|---------------------|
+| Operational  | Request flow, performance  | AOP / interceptors        | No PII permitted    |
+| Audit/GDPR   | Data access, modifications | Explicit domain events    | Pseudonymised       |
+
+For an e-commerce fulfilment system operating under GDPR:
+- The Right to Erasure (Art. 17) requires audit trails of data access that can themselves be erased
+- The Right of Access (Art. 15) requires knowing who accessed what data and when
+- Mixing these compliance events into the same `logger.info()` calls as operational logging creates a compliance risk — operational logs are retained indefinitely, audit logs must be erasable
+
+This two-tier separation is an architectural decision that requires domain analysis, not a boilerplate addition. It was deferred as out of scope for this assessment.
+
+3. Assessment Scope and Proportionality
+The assignment instructions list: *"Follow the software development best practices such as Code Quality, Coding Standards, Exception Handling & Logging etc."*
+
+The "etc." and the breadth of this list indicate directional guidance, not a pass/fail checklist. Given the 4-hour time constraint, the following prioritisation was applied:
+
+| Delivered (high architectural value)      | Deferred (low assessment value)          |
+|-------------------------------------------|------------------------------------------|
+| Feature-oriented package restructuring    | Application-level logging statements     |
+| 9 Architecture Decision Records           | —                                        |
+| CDI transactional events for data safety  | —                                        |
+| Hexagonal architecture with port testing  | —                                        |
+| CI/CD pipeline with coverage enforcement  | —                                        |
+| Health check endpoints (observability)    | —                                        |
+
+Adding `log.info()` calls would have been trivial to implement but would not have demonstrated architectural competence. The items delivered represent decisions that are substantially harder to add retroactively.
+
+Trade-off: No application-level log statements in the current codebase. In a production deployment, operational logging would be added via AOP interceptors (e.g., Quarkus `@Interceptor` or CDI decorators) to avoid polluting business logic, and compliance audit logging would be implemented as explicit domain events with pseudonymisation — following the same CDI event pattern already demonstrated in `LegacyStoreChangeObserver`.
+
+Reference: The Twelve-Factor App, Factor XI (*Logs*) — "A twelve-factor app never concerns itself with routing or storage of its output stream." Application code should emit events; infrastructure should handle aggregation, routing, and retention.
+
+---
+
 ## Decisions Deferred (Out of Scope for Assessment)
 
 | Decision                      | Rationale for Deferral                                            |
@@ -163,5 +254,4 @@ Rationale:
 | Testcontainers for PostgreSQL | No Docker available; H2 sufficient for assessment                 |
 | Multi-module Maven build      | Single-module constraint; logical separation via naming           |
 | Security / OAuth              | Assessment focuses on business logic, not infrastructure          |
-| Observability / tracing       | Would add infrastructure adapters without modifying existing code |
 | Circuit breakers / retries    | Service mesh concern; not relevant for single-service assessment  |

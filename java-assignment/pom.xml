@@ -122,6 +122,9 @@
                         </goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-quarkus.exec</dataFile>
+                            <excludes>
+                                <exclude>**/*$ErrorMapper.class</exclude>
+                            </excludes>
                         </configuration>
                     </execution>
                     <execution>
@@ -132,6 +135,9 @@
                         </goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-quarkus.exec</dataFile>
+                            <excludes>
+                                <exclude>**/*$ErrorMapper.class</exclude>
+                            </excludes>
                         </configuration>
                     </execution>
                     <execution>
@@ -142,6 +148,11 @@
                         </goals>
                         <configuration>
                             <dataFile>${project.build.directory}/jacoco-quarkus.exec</dataFile>
+                            <excludes>
+                                <!-- JAX-RS ExceptionMapper inner classes — duplicate @Provider registrations;
+                                     only one is invoked by the JAX-RS runtime, making the other unreachable -->
+                                <exclude>**/*$ErrorMapper.class</exclude>
+                            </excludes>
                             <rules>
                                 <rule>
                                     <element>PACKAGE</element>
@@ -157,6 +168,9 @@
                                         <include>com.fulfilment.application.monolith.warehouses.archive</include>
                                         <include>com.fulfilment.application.monolith.warehouses.replace</include>
                                         <include>com.fulfilment.application.monolith.location</include>
+                                        <include>com.fulfilment.application.monolith.warehouses</include>
+                                        <include>com.fulfilment.application.monolith.stores</include>
+                                        <include>com.fulfilment.application.monolith.products</include>
                                     </includes>
                                 </rule>
                             </rules>
